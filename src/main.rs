@@ -54,5 +54,9 @@ async fn main() -> Result<()> {
     signal_task.abort();
     let _ = signal_task.await;
 
+    // join reg task
+    reg_task.abort();
+    let _ = reg_task.await;
+
     Ok(())
 }
