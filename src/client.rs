@@ -1,11 +1,18 @@
-use tokio::{io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines}, net::{TcpStream, tcp::{OwnedReadHalf, OwnedWriteHalf}}, sync::{broadcast::Receiver, mpsc::Sender, oneshot}};
+use crate::protocol::{Command, WELCOME_C};
 use anyhow::{Result, bail};
-use crate::protocol::{CONN_CLOSED_S, Command, WELCOME_C};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
+    net::{
+        TcpStream,
+        tcp::{OwnedReadHalf, OwnedWriteHalf},
+    },
+    sync::{broadcast::Receiver, mpsc::Sender, oneshot},
+};
 
 enum ClientState {
     NoNick,
     HasNick,
-    InRoom
+    InRoom,
 }
 
 enum ClientAction {
@@ -20,15 +27,15 @@ pub struct Client {
     lines: Lines<BufReader<OwnedReadHalf>>,
     shutdown_rx: Receiver<()>,
     registry_tx: Sender<Command>,
-    nick: String
+    nick: String,
 }
 
 impl Client {
     pub fn new(
-        id: u64, 
-        socket: TcpStream, 
-        shutdown_rx: Receiver<()>, 
-        registry_tx: Sender<Command>
+        id: u64,
+        socket: TcpStream,
+        shutdown_rx: Receiver<()>,
+        registry_tx: Sender<Command>,
     ) -> Self {
         let (reader, writer) = socket.into_split();
         Self {
@@ -38,7 +45,7 @@ impl Client {
             lines: BufReader::new(reader).lines(),
             shutdown_rx,
             registry_tx,
-            nick: String::new()
+            nick: String::new(),
         }
     }
 
@@ -68,7 +75,7 @@ impl Client {
                                     }
                                 },
                                 Err(e) => {
-                                    eprintln!("conn #{} error: {e}", self.id);
+                                    eprintln!("conn #{} error handle command: {e}", self.id);
                                 }
                             }
                         }
@@ -81,7 +88,7 @@ impl Client {
     }
 
     async fn handle_command(&mut self, command: &str) -> Result<ClientAction> {
-        let mut cmd = "";
+        let cmd: &str;
         let mut params = "";
         let id = self.id;
         match command.split_once(" ") {
@@ -116,27 +123,25 @@ impl Client {
             }
             "/quit" => {
                 match self.registry_tx.send(Command::Quit { conn_id: id }).await {
-                    Ok(_) => {
-                        match self.state {
-                            ClientState::HasNick | ClientState::InRoom => {
-                                let nick = self.nick.to_string();
-                                self.send(&format!("goodbye, {nick}"));
-                            },
-                            ClientState::NoNick => {
-                                self.send("goodbye").await?;
-                            }
+                    Ok(_) => match self.state {
+                        ClientState::HasNick | ClientState::InRoom => {
+                            let nick = self.nick.to_string();
+                            self.send(&format!("goodbye, {nick}")).await?;
+                        }
+                        ClientState::NoNick => {
+                            self.send("goodbye").await?;
                         }
                     },
                     Err(e) => {
                         eprintln!("conn #{} error: {e}", self.id);
-                        self.send_error("failed to /quit");
+                        self.send_error("failed to /quit").await?;
                     }
                 }
                 return Ok(ClientAction::Quit);
             }
             _ => {
                 eprintln!("conn #{} error: unknown command {command}", self.id);
-                self.send_error("unknown command {command}");
+                self.send_error("unknown command {command}").await?;
             }
         }
 
@@ -144,11 +149,17 @@ impl Client {
     }
 
     async fn send_error(&mut self, msg: &str) -> Result<()> {
-        Ok(self.writer.write_all(format!("* error: {msg}\n").as_bytes()).await?)
+        Ok(self
+            .writer
+            .write_all(format!("* error: {msg}\n").as_bytes())
+            .await?)
     }
 
     async fn send(&mut self, msg: &str) -> Result<()> {
-        Ok(self.writer.write_all(format!("* {msg}\n").as_bytes()).await?)
+        Ok(self
+            .writer
+            .write_all(format!("* {msg}\n").as_bytes())
+            .await?)
     }
 
     async fn request<T>(
@@ -160,9 +171,13 @@ impl Client {
         Ok(rx.await?)
     }
 
-    async fn set_nick(&mut self, nick: &str) -> Result<()>{
+    async fn set_nick(&mut self, nick: &str) -> Result<()> {
         let conn_id = self.id;
-        let result = self.request(|reply| Command::SetNick { conn_id, nick: nick.to_string(), reply });
+        let result = self.request(|reply| Command::SetNick {
+            conn_id,
+            nick: nick.to_string(),
+            reply,
+        });
         match result.await? {
             Ok(()) => {
                 eprintln!("conn #{} set nick to {nick}", self.id);
@@ -171,7 +186,8 @@ impl Client {
             }
             Err(e) => {
                 eprintln!("conn #{} error: {e}", self.id);
-                self.send_error(&format!("failed to set nickname to {nick}")).await?;
+                self.send_error(&format!("failed to set nickname to {nick}"))
+                    .await?;
             }
         }
         Ok(())
@@ -181,17 +197,23 @@ impl Client {
         match self.state {
             ClientState::NoNick => {
                 // error -- must have nick set first
-                eprintln!("conn #{} error: nick must be set before joining a room", self.id);
-                self.send_error("you must set a nick before joining a room").await?;
+                eprintln!(
+                    "conn #{} error: nick must be set before joining a room",
+                    self.id
+                );
+                self.send_error("you must set a nick before joining a room")
+                    .await?;
                 Ok(())
-            },
+            }
             ClientState::HasNick | ClientState::InRoom => {
                 let conn_id = self.id; // pull id out so we don't have to use self in the closure
-                let result = self.request(|reply| Command::Join { 
-                    conn_id, 
-                    room: room_name.to_string(),
-                    reply 
-                }).await?;
+                let result = self
+                    .request(|reply| Command::Join {
+                        conn_id,
+                        room: room_name.to_string(),
+                        reply,
+                    })
+                    .await?;
                 match result {
                     Ok(nick) => {
                         eprintln!("conn #{} joined room {room_name}", self.id);
@@ -208,7 +230,7 @@ impl Client {
     }
 
     async fn leave_room(&mut self) -> Result<()> {
-        let conn_id = self.id;  
+        let conn_id = self.id;
         match self.state {
             ClientState::NoNick | ClientState::HasNick => {
                 // error state
@@ -216,10 +238,9 @@ impl Client {
                 self.send_error("you are not in a room").await?;
             }
             ClientState::InRoom => {
-                let result = self.request(|reply| Command::Leave { 
-                    conn_id, 
-                    reply 
-                }).await?;
+                let result = self
+                    .request(|reply| Command::Leave { conn_id, reply })
+                    .await?;
                 match result {
                     Ok((nick, room)) => {
                         eprintln!("conn #{} left room {room}", self.id);
@@ -233,36 +254,42 @@ impl Client {
                         self.send_error("failed to leave room").await?;
                     }
                 }
-            },
+            }
         }
         Ok(())
     }
 
     async fn list_rooms(&mut self) -> Result<()> {
         let rooms = self.request(|reply| Command::ListRooms { reply }).await?;
-        let val = rooms.iter()
-            .fold(String::new(), 
-            |val, x| 
-                val.to_string() + &x.0 + " (" + &x.1.to_string() + "), "
-        );
+        let val = rooms.iter().fold(String::new(), |val, x| {
+            val.to_string() + &x.0 + " (" + &x.1.to_string() + "), "
+        });
         let temp = val.rsplit_once(", ").unwrap().0;
         self.send(temp).await?;
         Ok(())
     }
 
     async fn who(&mut self) -> Result<()> {
-        let conn_id = self.id;
-        let who = self.request(|reply| Command::Who { conn_id, reply });
-        match who.await? {
-            Ok(who_vec) => {
-                let val = who_vec.iter()
-                    .fold(String::new(), |val, x| val.to_string() + &x + ", ");
-                let temp = val.rsplit_once(", ").unwrap_or_default().0;
-                self.send(temp).await?;
-            },
-            Err(e) => {
-                eprintln!("conn #{} error: failed to list users", self.id);
-                self.send_error("failed to run /who").await?;
+        match self.state {
+            ClientState::InRoom => {
+                let conn_id = self.id;
+                let who = self.request(|reply| Command::Who { conn_id, reply });
+                match who.await? {
+                    Ok(who_vec) => {
+                        let val = who_vec
+                            .iter()
+                            .fold(String::new(), |val, x| val.to_string() + &x + ", ");
+                        let temp = val.rsplit_once(", ").unwrap_or_default().0;
+                        self.send(temp).await?;
+                    }
+                    Err(e) => {
+                        eprintln!("conn #{} error {e}", self.id);
+                        self.send_error("failed to run /who").await?;
+                    }
+                }
+            }
+            ClientState::NoNick | ClientState::HasNick => {
+                self.send_error("you are not in a room").await?;
             }
         }
         Ok(())
