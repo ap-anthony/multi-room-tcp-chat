@@ -7,7 +7,7 @@ use anyhow::{Result, bail};
 
 #[derive(Default)]
 pub struct Room {
-    users: HashMap<u64, String>,
+    pub users: HashMap<u64, String>,
 }
 
 impl Room {

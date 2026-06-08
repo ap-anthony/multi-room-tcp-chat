@@ -59,10 +59,28 @@ impl Registry {
             None => bail!(format!("no room found for conn #{conn_id}"))
         }
     }
+
+    pub fn leave_room(&mut self, conn_id: u64) -> Result<()> {
+        // TODO leave room is failing
+        let room_name = self.connected_rooms.remove(&conn_id)
+            .ok_or_else(|| anyhow::anyhow!("conn #{conn_id} not in a room"))?;
+        self.rooms.get_mut(&room_name)
+            .expect("connected_rooms referenced a room that does not exist")
+            .leave(conn_id);
+        eprintln!("removed conn #{conn_id} from room {room_name}");
+        Ok(())
+    }
+
+    pub fn remove_user(&mut self, conn_id: u64) -> Result<()> {
+        let _ = self.nicknames.remove(&conn_id)
+            .ok_or_else(|| anyhow::anyhow!("conn #{conn_id} not a registered user"))?;
+        Ok(())
+    }
 }
 
 pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
     let mut state = Registry::new();
+
     while let Some(cmd) = rx.recv().await {
         match cmd {
             Command::SetNick {
@@ -82,25 +100,37 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
                 let _ = reply.send(Ok(state.nicknames.entry(conn_id).or_default().clone()));
             }
             Command::Leave { conn_id, reply } => {
-                let result = state.get_nickname(conn_id)
-                    .and_then(|nick| {
-                        state.get_connected_room_name(conn_id)
-                            .map(|room| (nick, room))
-                    });
-                match result {
-                    Ok((nick, room)) => {
-                        let _ = reply.send(Ok((nick, room)));
-                    },
-                    Err(e) => {
-                        let _ = reply.send(Err("you are not in a room"));
-                    }
+                let result = state.leave_room(conn_id);
+                if let Err(e) = result {
+                    let _ = reply.send(Err("you are not in a room"));
+                    eprintln!("conn #{conn_id} error: {e}")
                 }
             }
-            Command::Quit { conn_id } => todo!(),
-            Command::ListRooms { reply } => {
-                
+            Command::Quit { conn_id } => {
+                // remove from room and connected_rooms
+                eprintln!("removing from room...");
+                let result = state.leave_room(conn_id);
+                if let Err(e) = result {
+                    eprintln!("conn #{conn_id} error: {e}");
+                }
+
+                // remove from nicknames
+                eprintln!("removing from nicknames...");
+                let result = state.remove_user(conn_id);
+                if let Err(e) = result {
+                    eprintln!("conn #{conn_id} error: {e}");
+                }
             },
-            Command::Who { conn_id, reply } => todo!(),
+            Command::ListRooms { reply } => {
+                // TODO insertion order
+                let _ = reply.send(state.rooms.iter().map(|(room_name, room)| {
+                    (room_name.to_string(), room.users.len())
+                }).collect());
+            },
+            Command::Who { conn_id, reply } => {
+                // TODO insertion order
+                todo!();
+            },
             Command::Chat { conn_id, text } => todo!(),
             _ => {}
         }
