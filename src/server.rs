@@ -11,8 +11,8 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::protocol::Command;
 use crate::client::Client;
+use crate::protocol::Command;
 
 // lifecyle
 // server loop

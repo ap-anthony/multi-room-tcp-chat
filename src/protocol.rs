@@ -31,7 +31,7 @@ pub enum Command {
     },
 }
 
-// Strings section -- we suffix each string with _S or _C for server versus client 
+// Strings section -- we suffix each string with _S or _C for server versus client
 // facing strings
 
 // SPEC 3.3 defined strings
@@ -39,7 +39,8 @@ pub enum Command {
 // CLIENT FACING STRINGS
 // ---------------------------------------------------------------------------
 
-pub const WELCOME_C: &str = "welcome to chat. set a nick with /nick <name>, join a room with /join <name>";
+pub const WELCOME_C: &str =
+    "welcome to chat. set a nick with /nick <name>, join a room with /join <name>";
 
 /// {0} - new nickname
 pub const NICK_CHANGED_C: &str = "you are now {}";
@@ -80,7 +81,6 @@ pub const GOODBYE_C: &str = "goodbye, {}";
 pub const GOODBYE_NO_NICK_C: &str = "goodbye";
 
 pub const SERVER_SHUTDOWN_C: &str = "* server shutting down";
-
 
 // ---------------------------------------------------------------------------
 // SERVER FACING STRINGS
