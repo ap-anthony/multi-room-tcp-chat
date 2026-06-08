@@ -28,23 +28,19 @@ impl Registry {
             .get(&conn_id)
             .context(format!("no user found with id {conn_id}"))?
             .clone();
-        let room = self
-            .rooms
-            .entry(room_name.to_string())
-            .or_insert(Room::new());
+        let room = self.rooms.entry(room_name.to_string()).or_default();
         room.join(conn_id, &nick)?;
         self.connected_rooms.insert(conn_id, room_name.to_string());
         Ok(())
     }
 
-    pub fn leave(&mut self, conn_id: u64) {
-        // find the room the user is in and remove them.
-        if let Some(room_name) = self.connected_rooms.remove(&conn_id) {
-            if let Some(room) = self.rooms.get_mut(&room_name) {
-                room.leave(conn_id);
-            }
-        }
-    }
+    // pub fn leave(&mut self, conn_id: u64) {
+    //     // find the room the user is in and remove them.
+    //     if let Some(room_name) = self.connected_rooms.remove(&conn_id) &&
+    //         let Some(room) = self.rooms.get_mut(&room_name) {
+    //             room.leave(conn_id);
+    //     }
+    // }
 
     pub fn get_nickname(&mut self, conn_id: u64) -> Result<String> {
         match self.nicknames.get(&conn_id) {
@@ -53,12 +49,12 @@ impl Registry {
         }
     }
 
-    pub fn get_connected_room_name(&mut self, conn_id: u64) -> Result<String> {
-        match self.connected_rooms.get(&conn_id) {
-            Some(room) => Ok(room.to_string()),
-            None => bail!(format!("no room found for conn #{conn_id}")),
-        }
-    }
+    // pub fn get_connected_room_name(&mut self, conn_id: u64) -> Result<String> {
+    //     match self.connected_rooms.get(&conn_id) {
+    //         Some(room) => Ok(room.to_string()),
+    //         None => bail!(format!("no room found for conn #{conn_id}")),
+    //     }
+    // }
 
     pub fn leave_room(&mut self, conn_id: u64) -> Result<(String, String)> {
         // TODO leave room is failing
@@ -94,8 +90,8 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
                 nick,
                 reply,
             } => {
-                let result = state.set_nick(conn_id, &nick);
-                let _ = reply.send(Ok(result));
+                state.set_nick(conn_id, &nick);
+                let _ = reply.send(Ok(()));
             } // ... other variants
             Command::Join {
                 conn_id,
@@ -142,12 +138,17 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
                         .collect(),
                 );
             }
-            Command::Who { conn_id, reply } => {
+            Command::Who {
+                conn_id: _,
+                reply: _,
+            } => {
                 // TODO insertion order
                 todo!();
             }
-            Command::Chat { conn_id, text } => todo!(),
-            _ => {}
+            Command::Chat {
+                conn_id: _,
+                text: _,
+            } => todo!(),
         }
     }
 }

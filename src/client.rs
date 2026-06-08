@@ -278,7 +278,7 @@ impl Client {
                     Ok(who_vec) => {
                         let val = who_vec
                             .iter()
-                            .fold(String::new(), |val, x| val.to_string() + &x + ", ");
+                            .fold(String::new(), |val, x| val.to_string() + x + ", ");
                         let temp = val.rsplit_once(", ").unwrap_or_default().0;
                         self.send(temp).await?;
                     }
