@@ -80,7 +80,7 @@ impl Registry {
     }
 }
 
-pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
+pub async fn registry_task(mut rx: mpsc::Receiver<Command>) -> Result<()> {
     let mut state = Registry::new();
 
     while let Some(cmd) = rx.recv().await {
@@ -139,11 +139,14 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
                 );
             }
             Command::Who {
-                conn_id: _,
-                reply: _,
+                conn_id,
+                reply,
             } => {
-                // TODO insertion order
-                todo!();
+                let room_name = state.connected_rooms.get(&conn_id).ok_or_else(|| anyhow::anyhow!("registry error: no room"))?;
+                let room = state.rooms.get(room_name);
+                if let Some(r) = room {
+                    let _ = reply.send(Ok(r.ordered_users.clone()));
+                }
             }
             Command::Chat {
                 conn_id: _,
@@ -151,4 +154,5 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) {
             } => todo!(),
         }
     }
+    Ok(())
 }
