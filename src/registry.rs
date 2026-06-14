@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, bail};
-use std::collections::HashMap;
+use std::collections::{HashMap, hash_map::Entry::Occupied};
 use tokio::sync::mpsc;
 
 use crate::{protocol::Command, room::Room};
@@ -11,6 +11,8 @@ struct Registry {
 
     // reverse lookup to find what room a user is in based on their conn id
     connected_rooms: HashMap<u64, String>,
+
+    ordered_rooms: Vec<String>,
 }
 
 impl Registry {
@@ -29,18 +31,14 @@ impl Registry {
             .context(format!("no user found with id {conn_id}"))?
             .clone();
         let room = self.rooms.entry(room_name.to_string()).or_default();
+        let room_name_clone = room_name.to_string();
+        if !self.ordered_rooms.contains(&room_name_clone) {
+            self.ordered_rooms.push(room_name_clone);
+        }
         room.join(conn_id, &nick)?;
         self.connected_rooms.insert(conn_id, room_name.to_string());
         Ok(())
     }
-
-    // pub fn leave(&mut self, conn_id: u64) {
-    //     // find the room the user is in and remove them.
-    //     if let Some(room_name) = self.connected_rooms.remove(&conn_id) &&
-    //         let Some(room) = self.rooms.get_mut(&room_name) {
-    //             room.leave(conn_id);
-    //     }
-    // }
 
     pub fn get_nickname(&mut self, conn_id: u64) -> Result<String> {
         match self.nicknames.get(&conn_id) {
@@ -48,13 +46,6 @@ impl Registry {
             None => bail!(format!("no nickname set for conn #{conn_id}")),
         }
     }
-
-    // pub fn get_connected_room_name(&mut self, conn_id: u64) -> Result<String> {
-    //     match self.connected_rooms.get(&conn_id) {
-    //         Some(room) => Ok(room.to_string()),
-    //         None => bail!(format!("no room found for conn #{conn_id}")),
-    //     }
-    // }
 
     pub fn leave_room(&mut self, conn_id: u64) -> Result<(String, String)> {
         // TODO leave room is failing
@@ -74,9 +65,16 @@ impl Registry {
     pub fn remove_user(&mut self, conn_id: u64) -> Result<()> {
         let _ = self
             .nicknames
-            .remove(&conn_id)
-            .ok_or_else(|| anyhow::anyhow!("conn #{conn_id} not a registered user"))?;
+            .remove(&conn_id);
         Ok(())
+    }
+
+    pub fn is_in_room(&self, conn_id: u64) -> bool {
+        self.connected_rooms.contains_key(&conn_id)
+    }
+
+    pub fn has_nickname(&self, conn_id: u64) -> bool {
+        self.nicknames.contains_key(&conn_id)
     }
 }
 
@@ -98,6 +96,9 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) -> Result<()> {
                 room,
                 reply,
             } => {
+                if let Occupied(_) = state.connected_rooms.entry(conn_id) {
+                    let _ = state.leave_room(conn_id);
+                }
                 let _ = state.join(conn_id, &room);
                 let _ = reply.send(Ok(state.nicknames.entry(conn_id).or_default().clone()));
             }
@@ -115,27 +116,29 @@ pub async fn registry_task(mut rx: mpsc::Receiver<Command>) -> Result<()> {
             }
             Command::Quit { conn_id } => {
                 // remove from room and connected_rooms
-                eprintln!("removing from room...");
-                let result = state.leave_room(conn_id);
-                if let Err(e) = result {
-                    eprintln!("conn #{conn_id} error: {e}");
+                if state.is_in_room(conn_id) {
+                    let result = state.leave_room(conn_id);
+                    if let Err(e) = result {
+                        eprintln!("conn #{conn_id} error: {e}");
+                    }
                 }
 
                 // remove from nicknames
-                eprintln!("removing from nicknames...");
-                let result = state.remove_user(conn_id);
-                if let Err(e) = result {
-                    eprintln!("conn #{conn_id} error: {e}");
+                if state.has_nickname(conn_id) {
+                    let result = state.remove_user(conn_id);
+                    if let Err(e) = result {
+                        eprintln!("conn #{conn_id} error: {e}");
+                    }
                 }
             }
             Command::ListRooms { reply } => {
-                // TODO insertion order
+                // TODO clean up
                 let _ = reply.send(
                     state
-                        .rooms
+                        .ordered_rooms
                         .iter()
-                        .map(|(room_name, room)| (room_name.to_string(), room.users.len()))
-                        .collect(),
+                        .map(|r| (r.to_string(), state.rooms.get(r).unwrap().users.len()))
+                        .collect()
                 );
             }
             Command::Who {
