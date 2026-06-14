@@ -1,4 +1,4 @@
-use crate::protocol::{Command, WELCOME_C};
+use crate::protocol::Command;
 use anyhow::{Result, bail};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
@@ -50,7 +50,7 @@ impl Client {
     }
 
     pub async fn start(mut self) -> Result<()> {
-        self.send(WELCOME_C).await?;
+        self.send("welcome to chat. set a nick with /nick <name>, join a room with /join <name>").await?;
         loop {
             tokio::select! {
                 biased;
